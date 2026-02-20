@@ -10,7 +10,7 @@ export interface CityData {
     name: string;
     distance?: string;
   }>;
-  type: "city";
+  type: string;
   bestMonths?: number[];
   shoulderMonths?: number[];
   trending2026?: boolean;
@@ -80,6 +80,8 @@ export const CITIES: CityData[] = [
   { id: "amsterdam", name: "Amsterdam", country: "Netherlands", region: "Europe", airportCode: "AMS", type: "city", bestMonths: [4,5,6,7,8,9], shoulderMonths: [3,10] },
   { id: "hong-kong", name: "Hong Kong", country: "China", region: "Asia", airportCode: "HKG", type: "city", bestMonths: [10,11,12], shoulderMonths: [3,4,5] },
   { id: "seoul", name: "Seoul", country: "South Korea", region: "Asia", airportCode: "SEL", type: "city", bestMonths: [9,10,11,4,5], shoulderMonths: [6] },
+  { id: "busan", name: "Busan", country: "South Korea", region: "Asia", airportCode: "PUS", type: "city", bestMonths: [9,10,11,4,5], shoulderMonths: [6] },
+  { id: "jeju", name: "Jeju", country: "South Korea", region: "Asia", airportCode: "CJU", type: "city", bestMonths: [4,5,9,10], shoulderMonths: [3,11] },
   { id: "los-angeles", name: "Los Angeles", country: "United States", region: "North America", airportCode: "LAX", type: "city", bestMonths: [6,7,8], shoulderMonths: [4,5,9,10] },
   { id: "san-francisco", name: "San Francisco", country: "United States", region: "North America", airportCode: "SFO", type: "city", bestMonths: [6,7,8,9], shoulderMonths: [4,5,10] },
   { id: "las-vegas", name: "Las Vegas", country: "United States", region: "North America", airportCode: "LAS", type: "city", bestMonths: [3,4,5,9,10], shoulderMonths: [2,11] },
@@ -364,6 +366,8 @@ export const AIRPORTS = [
   { code: "DXB", name: "Dubai International Airport", city: "Dubai", country: "United Arab Emirates" },
   { code: "SIN", name: "Singapore Changi Airport", city: "Singapore", country: "Singapore" },
   { code: "ICN", name: "Incheon International Airport", city: "Seoul", country: "South Korea" },
+  { code: "PUS", name: "Gimhae International Airport", city: "Busan", country: "South Korea" },
+  { code: "CJU", name: "Jeju International Airport", city: "Jeju", country: "South Korea" },
   { code: "HKG", name: "Hong Kong International Airport", city: "Hong Kong", country: "China" },
   { code: "AMS", name: "Amsterdam Airport Schiphol", city: "Amsterdam", country: "Netherlands" },
   { code: "FRA", name: "Frankfurt Airport", city: "Frankfurt", country: "Germany" },
@@ -641,12 +645,35 @@ export const AIRPORTS = [
 export function searchCities(query: string, limit: number = 10): CityData[] {
   if (!query.trim()) return [];
   const q = query.toLowerCase();
-  return CITIES.filter((city) =>
+
+  const cityMatches = CITIES.filter((city) =>
     city.name.toLowerCase().includes(q) ||
     city.country.toLowerCase().includes(q) ||
     city.region.toLowerCase().includes(q) ||
     city.airportCode?.toLowerCase().includes(q)
-  ).slice(0, limit);
+  );
+
+  const countryMatches: CityData[] = [...new Set(CITIES.map((city) => city.country))]
+    .filter((country) => country.toLowerCase().includes(q))
+    .map((country) => ({
+      id: `${country.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-country`,
+      name: country,
+      country,
+      region: getRegion(country),
+      type: "country",
+    }));
+
+  const regionMatches: CityData[] = [...new Set(CITIES.map((city) => city.region))]
+    .filter((region) => region.toLowerCase().includes(q))
+    .map((region) => ({
+      id: `${region.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-region`,
+      name: region,
+      country: "Multiple",
+      region,
+      type: "region",
+    }));
+
+  return [...cityMatches, ...countryMatches, ...regionMatches].slice(0, limit);
 }
 
 export function searchAirports(query: string, limit: number = 10) {
