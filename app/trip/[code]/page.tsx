@@ -15,9 +15,6 @@ import {
   type CityData,
   isVisaFreeForUS
 } from "@/lib/cities-data";
-import {
-
-} from "@/lib/destinations-data.ts"
 import { cn } from "@/lib/utils";
 import React from "react";
 import { useState, useEffect, useCallback, useRef } from "react";
