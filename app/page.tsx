@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Plane, ArrowRight, MessageCircle, Link2 } from "lucide-react";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { getBlendByName, createBlend, getBlendByCodeOrAlias } from "@/lib/mock-db";
 import { toast } from "sonner";
 
 function generateInviteCode(): string {
@@ -33,30 +33,15 @@ export default function HomePage() {
       return;
     }
 
-    if (!isSupabaseConfigured()) {
-      toast.error("Database not configured. Please connect Supabase.");
-      return;
-    }
-
     setIsCreating(true);
-    const supabase = createClient();
 
     try {
       // Check if a trip with this exact name already exists (only if not forcing)
       if (!forceCreate) {
-        const { data: existingTrips, error: checkError } = await supabase
-          .from("blends")
-          .select("invite_code, alias")
-          .eq("name", tripName.trim())
-          .limit(1);
+        const existingTrip = getBlendByName(tripName.trim());
 
-        if (checkError) {
-          console.error("Error checking for existing trip:", checkError);
-        }
-
-        if (existingTrips && existingTrips.length > 0) {
+        if (existingTrip) {
           // Trip with this name already exists - show warning
-          const existingTrip = existingTrips[0];
           const tripLink = existingTrip.alias || existingTrip.invite_code;
           setDuplicateWarning({ link: tripLink });
           setIsCreating(false);
@@ -67,11 +52,7 @@ export default function HomePage() {
       // Create new trip
       const code = generateInviteCode();
 
-      const { error } = await supabase
-        .from("blends")
-        .insert({ name: tripName.trim(), invite_code: code });
-
-      if (error) throw error;
+      createBlend({ name: tripName.trim(), invite_code: code });
 
       toast.success("Trip created!");
       setDuplicateWarning(null);
@@ -90,11 +71,6 @@ export default function HomePage() {
       return;
     }
 
-    if (!isSupabaseConfigured()) {
-      toast.error("Database not configured. Please connect Supabase.");
-      return;
-    }
-
     // Extract code from full URL if pasted
     let codeToUse = inviteCode.trim();
     if (inviteCode.includes("/trip/")) {
@@ -105,21 +81,9 @@ export default function HomePage() {
     }
 
     setIsJoining(true);
-    const supabase = createClient();
 
     try {
-      // Check both invite_code (uppercase) and alias (case-insensitive)
-      const { data, error } = await supabase
-        .from("blends")
-        .select("invite_code, alias")
-        .or(`invite_code.eq.${codeToUse.toUpperCase()},alias.ilike.${codeToUse}`)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error finding trip:", error);
-        toast.error("Trip not found. Check your invite code.");
-        return;
-      }
+      const data = getBlendByCodeOrAlias(codeToUse);
 
       if (!data) {
         toast.error("Trip not found. Check your invite code.");
