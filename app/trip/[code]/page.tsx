@@ -2,7 +2,28 @@
 
 import { DropdownMenuLabel } from "@/components/ui/dropdown-menu"
 import { Plane, X, Search, Check, Calendar, MapPin, Users, Clock, Share2, ExternalLink, ChevronDown, Pencil, Trash2, Navigation, PlaneTakeoffIcon, HelpCircle, Sparkles } from "lucide-react";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import {
+  getBlendByCodeOrAlias,
+  getParticipantsByBlendId,
+  getAvailabilityByParticipantIds,
+  getDestinationsByParticipantIds,
+  getAvoidedDestinationsByParticipantIds,
+  createParticipant,
+  updateParticipant,
+  deleteParticipant,
+  createAvailability,
+  deleteAvailability,
+  createDestination,
+  deleteDestination,
+  createAvoidedDestination,
+  deleteAvoidedDestination,
+  updateBlend,
+  TripData,
+  Participant,
+  AvailabilityVote,
+  DestinationPick,
+  AvoidedDestination
+} from "@/lib/mock-db";
 import { toast } from "sonner";
 import { 
   CITIES, 
@@ -40,38 +61,6 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { TripRecapCard } from "@/components/trip-recap-card";
-
-interface Participant {
-  id: string;
-  name: string;
-  home_airport: string | null;
-  created_at: string;
-}
-
-interface AvailabilityVote {
-  participant_id: string;
-  year_month: string;
-}
-
-interface DestinationPick {
-  id: string;
-  participant_id: string;
-  destination_key: string;
-  destination_data: CityData | null;
-}
-
-interface AvoidedDestination {
-  id: string;
-  participant_id: string;
-  destination_key: string;
-  destination_data: CityData | null;
-}
-
-interface TripData {
-  id: string;
-  name: string;
-  invite_code: string;
-}
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -144,7 +133,6 @@ function Avatar({ name, size = "md" }: { name: string; size?: "xs" | "sm" | "md"
 export default function TripPage() {
   const params = useParams();
   const code = params.code as string;
-  const supabase = createClient();
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -270,21 +258,10 @@ export default function TripPage() {
   const months = getNext12Months();
 
   const fetchTripData = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setError("Database not configured. Please connect Supabase in v0 settings.");
-      setLoading(false);
-      return;
-    }
-
     try {
-      // Try to find trip by invite_code or alias
-      const { data: tripData, error: tripError } = await supabase
-        .from("blends")
-        .select("*")
-        .or(`invite_code.eq.${code},alias.eq.${code}`)
-        .single();
+      const tripData = getBlendByCodeOrAlias(code);
 
-      if (tripError || !tripData) {
+      if (!tripData) {
         setError("Trip not found");
         setLoading(false);
         return;
@@ -292,39 +269,24 @@ export default function TripPage() {
 
       setTrip(tripData);
 
-      const { data: participantsData } = await supabase
-        .from("participants")
-        .select("*")
-        .eq("blend_id", tripData.id)
-        .order("created_at", { ascending: true });
+      const participantsData = getParticipantsByBlendId(tripData.id);
+      setParticipants(participantsData);
 
-      setParticipants(participantsData || []);
+      const pIds = participantsData.map((p) => p.id);
 
-      const { data: availData } = await supabase
-        .from("availability")
-        .select("participant_id, year_month")
-        .in("participant_id", (participantsData || []).map((p) => p.id));
+      const availData = getAvailabilityByParticipantIds(pIds);
+      setAvailability(availData);
 
-      setAvailability(availData || []);
-
-      const { data: destData } = await supabase
-        .from("destinations")
-        .select("id, participant_id, destination_key, destination_data")
-        .in("participant_id", (participantsData || []).map((p) => p.id));
-
-      setDestinations(destData || []);
+      const destData = getDestinationsByParticipantIds(pIds);
+      setDestinations(destData);
       
-      const { data: avoidedData } = await supabase
-        .from("avoided_destinations")
-        .select("id, participant_id, destination_key, destination_data")
-        .in("participant_id", (participantsData || []).map((p) => p.id));
-
-      setAvoidedDestinations(avoidedData || []);
+      const avoidedData = getAvoidedDestinationsByParticipantIds(pIds);
+      setAvoidedDestinations(avoidedData);
 
       // Check for existing profile
       const storedProfile = getStoredProfile(code);
       if (storedProfile) {
-        const participant = (participantsData || []).find((p) => p.id === storedProfile.id);
+        const participant = participantsData.find((p) => p.id === storedProfile.id);
         if (participant) {
           const profile = {
             id: storedProfile.id,
@@ -405,21 +367,15 @@ export default function TripPage() {
     setIsJoining(true);
 
     try {
-      const { data, error } = await supabase
-        .from("participants")
-        .insert({
-          blend_id: trip.id,
-          name: userName.trim(),
-          home_airport: homeAirport || null,
-        })
-        .select()
-        .single();
+      const newParticipant = createParticipant({
+        blend_id: trip.id,
+        name: userName.trim(),
+        home_airport: homeAirport || null,
+      });
 
-      if (error) throw error;
-
-      const profile = { id: data.id, name: userName.trim(), homeAirport: homeAirport || undefined };
+      const profile = { id: newParticipant.id, name: userName.trim(), homeAirport: homeAirport || undefined };
       setStoredProfile(code, profile);
-      setCurrentUserId(data.id);
+      setCurrentUserId(newParticipant.id);
       setUserName(userName.trim());
       setHomeAirport(homeAirport || "");
       setHasJoined(true);
@@ -452,16 +408,11 @@ export default function TripPage() {
     
     setIsCreatingPerson(true);
     try {
-      const { data: newParticipant, error } = await supabase
-        .from("participants")
-        .insert({
-          blend_id: trip.id,
-          name: newPersonName.trim(),
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const newParticipant = createParticipant({
+        blend_id: trip.id,
+        name: newPersonName.trim(),
+        home_airport: null,
+      });
 
       toast.success(`${newPersonName} added to trip`);
       setParticipants([...participants, newParticipant]);
@@ -485,12 +436,7 @@ export default function TripPage() {
     
     setIsSavingTripName(true);
     try {
-      const { error } = await supabase
-        .from("blends")
-        .update({ name: editTripNameValue.trim() })
-        .eq("id", trip.id);
-
-      if (error) throw error;
+      updateBlend(trip.id, { name: editTripNameValue.trim() });
 
       setTrip({ ...trip, name: editTripNameValue.trim() });
       toast.success("Trip name updated");
@@ -517,27 +463,14 @@ export default function TripPage() {
     setIsSavingAlias(true);
     try {
       // First check if alias already exists for a different trip
-      const { data: existingTrip, error: checkError } = await supabase
-        .from("blends")
-        .select("id")
-        .eq("alias", slug)
-        .single();
-
-      if (checkError && checkError.code !== "PGRST116") {
-        throw checkError;
-      }
+      const existingTrip = getBlendByCodeOrAlias(slug);
 
       if (existingTrip && existingTrip.id !== trip.id) {
         toast.error("This alias is already taken by another trip");
         return;
       }
 
-      const { error } = await supabase
-        .from("blends")
-        .update({ alias: slug })
-        .eq("id", trip.id);
-
-      if (error) throw error;
+      updateBlend(trip.id, { alias: slug });
 
       setTrip({ ...trip, alias: slug });
       toast.success(`Trip alias set to ${slug}`);
@@ -548,11 +481,7 @@ export default function TripPage() {
       window.history.replaceState({}, '', `/trip/${slug}`);
     } catch (error: any) {
       console.error("Error setting alias:", error);
-      if (error?.code === "23505") {
-        toast.error("This alias is already taken");
-      } else {
-        toast.error("Failed to set alias");
-      }
+      toast.error("Failed to set alias");
     } finally {
       setIsSavingAlias(false);
     }
@@ -576,12 +505,7 @@ export default function TripPage() {
     setIsSavingName(true);
 
     try {
-      const { error } = await supabase
-        .from("participants")
-        .update({ name: editNameValue.trim() })
-        .eq("id", currentUserId);
-
-      if (error) throw error;
+      updateParticipant(currentUserId, { name: editNameValue.trim() });
 
       setUserName(editNameValue.trim());
       setStoredProfile(code, { id: currentUserId, name: editNameValue.trim(), homeAirport: homeAirport || undefined });
@@ -599,9 +523,7 @@ export default function TripPage() {
     if (!currentUserId) return;
 
     try {
-      await supabase.from("availability").delete().eq("participant_id", currentUserId);
-      await supabase.from("destinations").delete().eq("participant_id", currentUserId);
-      await supabase.from("participants").delete().eq("id", currentUserId);
+      deleteParticipant(currentUserId);
 
       removeStoredProfile(code);
       setCurrentUserId(null);
@@ -620,12 +542,7 @@ export default function TripPage() {
     if (!currentUserId) return;
 
     try {
-      const { error } = await supabase
-        .from("participants")
-        .update({ home_airport: airportCode })
-        .eq("id", currentUserId);
-
-      if (error) throw error;
+      updateParticipant(currentUserId, { home_airport: airportCode });
 
       setHomeAirport(airportCode);
       setStoredProfile(code, { id: currentUserId, name: userName, homeAirport: airportCode });
@@ -636,42 +553,27 @@ export default function TripPage() {
   };
 
   const toggleMonth = async (monthKey: string) => {
-    if (!currentUserId) return;
+    if (!currentUserId || !trip) return;
 
     const hasVoted = availability.some(
       (a) => a.participant_id === currentUserId && a.year_month === monthKey
     );
 
-    // Optimistic update - instant UI feedback
-    if (hasVoted) {
-      setAvailability(prev => prev.filter(
-        a => !(a.participant_id === currentUserId && a.year_month === monthKey)
-      ));
-    } else {
-      setAvailability(prev => [...prev, {
-        participant_id: currentUserId,
-        year_month: monthKey,
-        id: `temp-${Date.now()}`,
-        blend_id: trip?.id || ''
-      }]);
-    }
-
     try {
       if (hasVoted) {
-        await supabase
-          .from("availability")
-          .delete()
-          .eq("participant_id", currentUserId)
-          .eq("year_month", monthKey);
+        deleteAvailability(currentUserId, monthKey);
+        setAvailability(prev => prev.filter(
+          a => !(a.participant_id === currentUserId && a.year_month === monthKey)
+        ));
       } else {
-        await supabase.from("availability").insert({
+        const newAvail = createAvailability({
+          blend_id: trip.id,
           participant_id: currentUserId,
           year_month: monthKey,
         });
+        setAvailability(prev => [...prev, newAvail]);
       }
-      // Only refetch to get server-generated data if needed
     } catch (error) {
-      // Rollback optimistic update on error
       console.error("[v0] Failed to toggle month:", error);
       fetchTripData();
       toast.error("Failed to update availability");
@@ -679,7 +581,7 @@ export default function TripPage() {
   };
 
   const addDestination = async (dest: CityData) => {
-    if (!currentUserId) return;
+    if (!currentUserId || !trip) return;
 
     const alreadyAdded = destinations.some(
       (d) => d.participant_id === currentUserId && d.destination_key === dest.id
@@ -689,40 +591,21 @@ export default function TripPage() {
       return;
     }
 
-    // Optimistic update
-    const tempId = `temp-${Date.now()}`;
-    const tempDestination = {
-      id: tempId,
-      participant_id: currentUserId,
-      destination_key: dest.id,
-      destination_data: dest,
-      interest_level: 3,
-      blend_id: trip?.id || ''
-    };
-    setDestinations(prev => [...prev, tempDestination]);
-    setSearchQuery("");
-    setShowSearch(false);
-    toast.success(`Added ${dest.name}`);
-
     try {
-      const { data, error } = await supabase.from("destinations")
-        .insert({
-          participant_id: currentUserId,
-          destination_key: dest.id,
-          destination_data: dest,
-          interest_level: 3,
-        })
-        .select()
-        .single();
+      const newDest = createDestination({
+        blend_id: trip.id,
+        participant_id: currentUserId,
+        destination_key: dest.id,
+        destination_data: dest,
+        interest_level: 3,
+      });
 
-      if (error) throw error;
-
-      // Replace temp with real data
-      setDestinations(prev => prev.map(d => d.id === tempId ? data : d));
+      setDestinations(prev => [...prev, newDest]);
+      setSearchQuery("");
+      setShowSearch(false);
+      toast.success(`Added ${dest.name}`);
     } catch (error) {
       console.error("[v0] Failed to add destination:", error);
-      // Rollback optimistic update
-      setDestinations(prev => prev.filter(d => d.id !== tempId));
       toast.error("Failed to add destination");
     }
   };
@@ -730,24 +613,17 @@ export default function TripPage() {
   const removeDestination = async (destId: string) => {
     if (!currentUserId) return;
 
-    // Optimistic update - remove immediately
-    const removedDest = destinations.find(d => d.id === destId);
-    setDestinations(prev => prev.filter(d => d.id !== destId));
-
     try {
-      await supabase.from("destinations").delete().eq("id", destId);
+      deleteDestination(destId);
+      setDestinations(prev => prev.filter(d => d.id !== destId));
     } catch (error) {
       console.error("[v0] Failed to remove destination:", error);
-      // Rollback optimistic update
-      if (removedDest) {
-        setDestinations(prev => [...prev, removedDest]);
-      }
       toast.error("Failed to remove destination");
     }
   };
   
   const addAvoidedDestination = async (dest: CityData) => {
-    if (!currentUserId) return;
+    if (!currentUserId || !trip) return;
 
     const alreadyAvoided = avoidedDestinations.some(
       (d) => d.participant_id === currentUserId && d.destination_key === dest.id
@@ -757,38 +633,20 @@ export default function TripPage() {
       return;
     }
 
-    // Optimistic update
-    const tempId = `temp-${Date.now()}`;
-    const tempAvoided = {
-      id: tempId,
-      participant_id: currentUserId,
-      destination_key: dest.id,
-      destination_data: dest,
-      blend_id: trip?.id || ''
-    };
-    setAvoidedDestinations(prev => [...prev, tempAvoided]);
-    setAvoidSearchQuery("");
-    setShowAvoidSearch(false);
-    toast.success(`Will avoid ${dest.name}`);
-
     try {
-      const { data, error } = await supabase.from("avoided_destinations")
-        .insert({
-          participant_id: currentUserId,
-          destination_key: dest.id,
-          destination_data: dest,
-        })
-        .select()
-        .single();
+      const newAvoided = createAvoidedDestination({
+        blend_id: trip.id,
+        participant_id: currentUserId,
+        destination_key: dest.id,
+        destination_data: dest,
+      });
 
-      if (error) throw error;
-
-      // Replace temp with real data
-      setAvoidedDestinations(prev => prev.map(d => d.id === tempId ? data : d));
+      setAvoidedDestinations(prev => [...prev, newAvoided]);
+      setAvoidSearchQuery("");
+      setShowAvoidSearch(false);
+      toast.success(`Will avoid ${dest.name}`);
     } catch (error) {
       console.error("[v0] Failed to add avoided destination:", error);
-      // Rollback optimistic update
-      setAvoidedDestinations(prev => prev.filter(d => d.id !== tempId));
       toast.error("Failed to add to avoid list");
     }
   };
@@ -796,18 +654,11 @@ export default function TripPage() {
   const removeAvoidedDestination = async (destId: string) => {
     if (!currentUserId) return;
 
-    // Optimistic update
-    const removed = avoidedDestinations.find(d => d.id === destId);
-    setAvoidedDestinations(prev => prev.filter(d => d.id !== destId));
-
     try {
-      await supabase.from("avoided_destinations").delete().eq("id", destId);
+      deleteAvoidedDestination(destId);
+      setAvoidedDestinations(prev => prev.filter(d => d.id !== destId));
     } catch (error) {
       console.error("[v0] Failed to remove avoided destination:", error);
-      // Rollback optimistic update
-      if (removed) {
-        setAvoidedDestinations(prev => [...prev, removed]);
-      }
       toast.error("Failed to remove from avoid list");
     }
   };
